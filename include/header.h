@@ -78,5 +78,4 @@ POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIRPYT,
                                            (float, roll, roll) (float, pitch, pitch) (float, yaw, yaw)
                                            (double, time, time))
 
-
 #endif //SLOAM_HEADER_H
