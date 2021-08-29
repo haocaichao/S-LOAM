@@ -68,6 +68,19 @@ S-LOAM的效果如下图所示。
 
 代码地址为（https://github.com/haocaichao/S-LOAM）。
 
+打开一个终端，输入下面两条命令，启动sloam程序。
+
+```
+source devel/setup.bash
+roslaunch sloam run.launch
+```
+
+打开另一个终端，输入下面命令，运行数据。
+
+```
+rosbag play kitti_loop_eloam.bag
+```
+
 
 
 ## 5、S-LOAM的优缺点
