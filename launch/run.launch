@@ -1,0 +1,7 @@
+<launch>
+    <arg name="project" default="sloam"/>
+    <node pkg="$(arg project)" type="frameFeature" name="frameFeature" output="screen" respawn="true"/>
+    <node pkg="$(arg project)" type="lidarOdometry" name="lidarOdometry" output="screen" respawn="true"/>
+    <node pkg="$(arg project)" type="mapOptmization" name="mapOptmization" output="screen" respawn="true"/>
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sloam)/launch/rviz.rviz"/>
+</launch>
