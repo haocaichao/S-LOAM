@@ -1,3 +1,7 @@
+/**
+ * Created by haocaichao on 2021/8/29
+ */
+
 #include "header.h"
 
 typedef VelodynePointXYZIRT PointType;
@@ -15,6 +19,7 @@ float planeMin=0.5;
 int planeSpan=2;
 int rowIndexStart=0;
 int rowIndexEnd=0;
+pcl::VoxelGrid<PointTypeOut> downSizeFilterPlane;
 
 void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
     framePtr->clear();
@@ -100,6 +105,11 @@ void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
             }
         }
     }
+
+    pcl::PointCloud<PointTypeOut>::Ptr cloud_temp(new pcl::PointCloud<PointTypeOut>());
+    downSizeFilterPlane.setInputCloud(framePlanePtr);
+    downSizeFilterPlane.filter(*cloud_temp);
+
     sensor_msgs::PointCloud2 planeCloudMsg;
     pcl::toROSMsg(*framePlanePtr, planeCloudMsg);
     planeCloudMsg.header.stamp = cldMsg->header.stamp;
@@ -123,6 +133,7 @@ int main(int argc, char **argv) {
         rowIndexStart=5;
         rowIndexEnd=5;
     }
+    downSizeFilterPlane.setLeafSize(0.2,0.2,0.2);
 
     ros::init(argc, argv, "FrameFeature");
     ros::NodeHandle nh;
