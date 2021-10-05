@@ -32,7 +32,7 @@ int rowIndexEnd=0;       //定义点云线内点终点索引
 pcl::VoxelGrid<PointTypeOut> downSizeFilterPlane;  //定义点云下采样对象，用于点云抽稀
 
 //接收原始点云，处理，发布
-void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
+void cloudHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
     framePtr->clear();                    //存储点云之前需要先清空
     framePlanePtr->clear();
     v_scan_row = std::vector<pcl::PointCloud<PointType>>(N_SCAN_ROW);
@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "FrameFeature");
     ros::NodeHandle nh;
     //订阅原始激光雷达数据
-    sub_lidar_frame_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 10, cldHandler);
+    sub_lidar_frame_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 10, cloudHandler);
     //发布平面特征点云
     pub_plane_frame_cloud = nh.advertise<sensor_msgs::PointCloud2>("/plane_frame_cloud1", 100);
     //发布原始点云

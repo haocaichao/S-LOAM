@@ -14,7 +14,7 @@ typedef pcl::PointXYZI PointType;
 
 int isDone=1;         //标识运算是否完成
 float planeMax=0.5;   //平面判断门槛值
-std::mutex mBuf;      //多线程锁
+std::mutex mLock;      //多线程锁
 pcl::VoxelGrid<PointType> downSizeFilterMap;  //定义点云下采样对象，用于点云抽稀
 
 /**
@@ -248,10 +248,10 @@ void frameRegistration(){
 }
 
 //接收平面特征点云，添加到消息队列中
-void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
-    mBuf.lock();
+void cloudHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
+    mLock.lock();
     planeQueue.push(*cldMsg);
-    mBuf.unlock();
+    mLock.unlock();
 }
 
 //点云处理线程函数
@@ -267,13 +267,13 @@ void cloudThread(){
             numFrame++;
             rate2.sleep();
 
-            mBuf.lock();               //锁线程，取数据
+            mLock.lock();               //锁线程，取数据
             currPlaneCloudPtr->clear();
             currHead=planeQueue.front().header;
             timePlane=planeQueue.front().header.stamp.toSec();
             pcl::fromROSMsg(planeQueue.front(),*currPlaneCloudPtr);
             planeQueue.pop();
-            mBuf.unlock();
+            mLock.unlock();
 
             if(flagStart==0){          //标志起始帧
                 flagStart=1;
@@ -298,7 +298,7 @@ int main(int argc, char **argv) {
 
     ros::init(argc, argv, "LidarOdometry");
     ros::NodeHandle nh;
-    sub_plane_frame_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/plane_frame_cloud1", 10, cldHandler);
+    sub_plane_frame_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/plane_frame_cloud1", 10, cloudHandler);
     pub_plane_frame_cloud=nh.advertise<sensor_msgs::PointCloud2>("/plane_frame_cloud2",100);
     pub_frame_odometry = nh.advertise<nav_msgs::Odometry>("/frame_odom2", 100);
     pub_frame_odom_path = nh.advertise<nav_msgs::Path>("/frame_odom_path2", 100);

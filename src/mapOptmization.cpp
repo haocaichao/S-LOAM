@@ -4,30 +4,33 @@
 
 #include "header.h"
 
-typedef PointXYZIRPYT  PointTypePose6D;
-typedef pcl::PointXYZI PointTypePose3D;
-typedef pcl::PointXYZI PointType;
+typedef PointXYZIRPYT  PointTypePose6D;   //x,y,z,roll,pitch,yaw
+typedef pcl::PointXYZI PointTypePose3D;   //x,y,z
+typedef pcl::PointXYZI PointType;         //x,y,z 同上
 
-ros::Subscriber sub_plane_frame_cloud;
-ros::Subscriber sub_frame_Odometry;
-ros::Publisher pub_sum_map_cloud;      //点云地图
-ros::Publisher pub_map_frame;          //当前帧
-ros::Publisher pub_map_odometry;       //里程计
-ros::Publisher pub_map_path;           //路径
+ros::Subscriber sub_plane_frame_cloud;    //接收平面特征点云
+ros::Subscriber sub_frame_Odometry;       //接收激光里程计
+ros::Publisher pub_sum_map_cloud;         //发布里程计优化后的点云地图
+ros::Publisher pub_map_frame;             //发布里程计优化后的当前帧（坐标转换后）
+ros::Publisher pub_map_odometry;          //发布优化后的里程计
+ros::Publisher pub_map_path;              //发布优化后的轨迹
 nav_msgs::Path globalPath;
 pcl::PointCloud<PointType>::Ptr currFramePlanePtr(new pcl::PointCloud<PointType>());
 pcl::PointCloud<PointType>::Ptr mapCloudPtr(new pcl::PointCloud<PointType>());
+//关键帧空间位置点云对象
 pcl::PointCloud<PointTypePose3D>::Ptr keyPose3DCloud(new pcl::PointCloud<PointTypePose3D>());
+//关键帧位姿点云对象（包含位置和方向）
 pcl::PointCloud<PointTypePose6D>::Ptr keyPose6DCloud(new pcl::PointCloud<PointTypePose6D>());
+//关键帧数据数组
 std::vector<pcl::PointCloud<PointType>> keyFrameVector;
+//关键帧位置查找树kdtree
 pcl::KdTreeFLANN<PointType>::Ptr kdtreeHistoryKeyPoses(new pcl::KdTreeFLANN<PointType>());
 pcl::VoxelGrid<PointType> downSizeFilterICP;
 pcl::VoxelGrid<PointType> downSizeFilterMap;
 std_msgs::Header currHead;
 std::queue<sensor_msgs::PointCloud2ConstPtr> planeQueue;
-std::queue<sensor_msgs::PointCloud2ConstPtr> planeBuf;
-std::queue<nav_msgs::OdometryConstPtr> odometryBuf;
-std::mutex mBuf;
+std::queue<nav_msgs::OdometryConstPtr> odometryQueue;
+std::mutex mLock;
 double timePlane=0;
 double timeOdom=0;
 double arr6d[6]={0,0,0,0,0,0};
@@ -50,15 +53,15 @@ gtsam::Values isamCurrentEstimate;
 gtsam::ISAM2Params parameters;
 
 void planeCloudHandler(const sensor_msgs::PointCloud2ConstPtr &planeCloudMsg) {
-    mBuf.lock();
-    planeBuf.push(planeCloudMsg);
-    mBuf.unlock();
+    mLock.lock();
+    planeQueue.push(planeCloudMsg);
+    mLock.unlock();
 }
 
 void odomHandler(const nav_msgs::Odometry::ConstPtr &odomMsg){
-    mBuf.lock();
-    odometryBuf.push(odomMsg);
-    mBuf.unlock();
+    mLock.lock();
+    odometryQueue.push(odomMsg);
+    mLock.unlock();
 }
 
 void addPose3D6D(double x,double y,double z,double roll,double pitch,double yaw,double time){
@@ -370,31 +373,31 @@ void cloudThread(){
     while(1){
         rate.sleep();
         if(isDone==0) continue;
-        while (!odometryBuf.empty() && !planeBuf.empty()){
+        while (!odometryQueue.empty() && !planeQueue.empty()){
             if(isDone==0) continue;
-            mBuf.lock();
-            currHead.stamp=planeBuf.front()->header.stamp;
-            timePlane=planeBuf.front()->header.stamp.toSec();
-            timeOdom=odometryBuf.front()->header.stamp.toSec();
+            mLock.lock();
+            currHead.stamp=planeQueue.front()->header.stamp;
+            timePlane=planeQueue.front()->header.stamp.toSec();
+            timeOdom=odometryQueue.front()->header.stamp.toSec();
             if(std::fabs(timePlane-timeOdom)>0.005){
                 printf("frame time unsync messeage! \n");
-                mBuf.unlock();
+                mLock.unlock();
                 break;
             }
             isDone=0;
             numFrame++;
             currFramePlanePtr->clear();
-            pcl::fromROSMsg(*planeBuf.front(),*currFramePlanePtr);
-            planeBuf.pop();
-            q_fodom_0_curr.x()=odometryBuf.front()->pose.pose.orientation.x;
-            q_fodom_0_curr.y()=odometryBuf.front()->pose.pose.orientation.y;
-            q_fodom_0_curr.z()=odometryBuf.front()->pose.pose.orientation.z;
-            q_fodom_0_curr.w()=odometryBuf.front()->pose.pose.orientation.w;
-            t_fodom_0_curr.x()=odometryBuf.front()->pose.pose.position.x;
-            t_fodom_0_curr.y()=odometryBuf.front()->pose.pose.position.y;
-            t_fodom_0_curr.z()=odometryBuf.front()->pose.pose.position.z;
-            odometryBuf.pop();
-            mBuf.unlock();
+            pcl::fromROSMsg(*planeQueue.front(),*currFramePlanePtr);
+            planeQueue.pop();
+            q_fodom_0_curr.x()=odometryQueue.front()->pose.pose.orientation.x;
+            q_fodom_0_curr.y()=odometryQueue.front()->pose.pose.orientation.y;
+            q_fodom_0_curr.z()=odometryQueue.front()->pose.pose.orientation.z;
+            q_fodom_0_curr.w()=odometryQueue.front()->pose.pose.orientation.w;
+            t_fodom_0_curr.x()=odometryQueue.front()->pose.pose.position.x;
+            t_fodom_0_curr.y()=odometryQueue.front()->pose.pose.position.y;
+            t_fodom_0_curr.z()=odometryQueue.front()->pose.pose.position.z;
+            odometryQueue.pop();
+            mLock.unlock();
             T_fodom_0_curr=Eigen::Affine3d::Identity();
             T_fodom_0_curr.rotate(q_fodom_0_curr);
             T_fodom_0_curr.pretranslate(t_fodom_0_curr);
