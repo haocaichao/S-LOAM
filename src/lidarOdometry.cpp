@@ -254,10 +254,10 @@ void cloudHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
     mLock.unlock();
 }
 
-//点云处理线程函数
+//点云处理多线程函数
 void cloudThread(){
     ros::Rate rate(10);                //控制处理频率为10hz，为最终频率
-    while(1){
+    while(ros::ok()){
         rate.sleep();
         ros::Rate rate2(50);           //内层处理频率为50hz
         if(isDone==0) continue;

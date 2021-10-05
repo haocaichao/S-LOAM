@@ -1,5 +1,13 @@
 /**
  * Created by haocaichao on 2021/8/29
+ *
+ *里程计图优化
+ * （1）接收特征点云和待优化的里程计
+ * （2）关键帧判断与信息记录（关键位置、位姿、轨迹、帧数据）
+ * （3）添加里程计因子
+ * （4）添加闭环因子（闭环帧判断、闭环局部地图提取、闭环配准）
+ * （5）里程计图优化与历史更新
+ * （6）发布优化校正结果
  */
 
 #include "header.h"
@@ -17,7 +25,7 @@ ros::Publisher pub_map_path;              //发布优化后的轨迹
 nav_msgs::Path globalPath;
 pcl::PointCloud<PointType>::Ptr currFramePlanePtr(new pcl::PointCloud<PointType>());
 pcl::PointCloud<PointType>::Ptr mapCloudPtr(new pcl::PointCloud<PointType>());
-//关键帧空间位置点云对象
+//关键帧空间位置点云对象（将各关键位置点存储在一个点云对象中，方便位置查找）
 pcl::PointCloud<PointTypePose3D>::Ptr keyPose3DCloud(new pcl::PointCloud<PointTypePose3D>());
 //关键帧位姿点云对象（包含位置和方向）
 pcl::PointCloud<PointTypePose6D>::Ptr keyPose6DCloud(new pcl::PointCloud<PointTypePose6D>());
@@ -28,42 +36,44 @@ pcl::KdTreeFLANN<PointType>::Ptr kdtreeHistoryKeyPoses(new pcl::KdTreeFLANN<Poin
 pcl::VoxelGrid<PointType> downSizeFilterICP;
 pcl::VoxelGrid<PointType> downSizeFilterMap;
 std_msgs::Header currHead;
-std::queue<sensor_msgs::PointCloud2ConstPtr> planeQueue;
-std::queue<nav_msgs::OdometryConstPtr> odometryQueue;
+std::queue<sensor_msgs::PointCloud2> planeQueue;    //定义点云消息队列
+std::queue<nav_msgs::Odometry> odometryQueue;       //定义里程计消息队列
 std::mutex mLock;
 double timePlane=0;
 double timeOdom=0;
-double arr6d[6]={0,0,0,0,0,0};
+double arr6d[6]={0,0,0,0,0,0};                      //数组存储6D位姿信息（x,y,z,roll,pitch,yaw）
 Eigen::Quaterniond q_fodom_0_curr(1,0,0,0);
 Eigen::Vector3d t_fodom_0_curr(0,0,0);
-Eigen::Affine3d T_fodom_0_curr=Eigen::Affine3d::Identity();
-Eigen::Affine3d T_map_0_curr=Eigen::Affine3d::Identity();
-Eigen::Affine3d trans_map_0_curr_i=Eigen::Affine3d::Identity();
-Eigen::Affine3d trans_loop_adjust=Eigen::Affine3d::Identity();
+Eigen::Affine3d T_fodom_0_curr=Eigen::Affine3d::Identity();     //变换，帧帧里程计中，当前帧到起点
+Eigen::Affine3d T_map_0_curr=Eigen::Affine3d::Identity();       //变换，优化里程计中，当前帧到起点
+Eigen::Affine3d trans_map_0_curr_i=Eigen::Affine3d::Identity(); //变换，优化处理后，当前帧到起点
+Eigen::Affine3d trans_loop_adjust=Eigen::Affine3d::Identity();  //变换，累计闭环校正量，当前帧到闭环帧
 int isDone=1;
 int numFrame=0;
-bool aLoopIsClosed = false;
+bool aLoopIsClosed = false;               //是否闭环成功
 size_t loopRecordIndex=0;
-Eigen::Affine3d correctionLidarFrame;  // 闭环优化得到的当前关键帧与闭环关键帧之间的位姿变换
+Eigen::Affine3d correctionLidarFrame;     //变换，本次闭环优化校正量，当前帧到闭环帧
 std::map<int, int> loopIndexContainer;
-gtsam::NonlinearFactorGraph gtSAMgraph;   // gtsam
+
+gtsam::NonlinearFactorGraph gtSAMgraph;   //定义图优化对象
 gtsam::Values initialEstimate;
 gtsam::ISAM2 *isam;
-gtsam::Values isamCurrentEstimate;
+gtsam::Values isamCurrentEstimate;        //图优化结果
 gtsam::ISAM2Params parameters;
 
 void planeCloudHandler(const sensor_msgs::PointCloud2ConstPtr &planeCloudMsg) {
     mLock.lock();
-    planeQueue.push(planeCloudMsg);
+    planeQueue.push(*planeCloudMsg);
     mLock.unlock();
 }
 
 void odomHandler(const nav_msgs::Odometry::ConstPtr &odomMsg){
     mLock.lock();
-    odometryQueue.push(odomMsg);
+    odometryQueue.push(*odomMsg);
     mLock.unlock();
 }
 
+//将6D位姿信息与时间戳存入位置对象、位姿对象、轨迹对象
 void addPose3D6D(double x,double y,double z,double roll,double pitch,double yaw,double time){
     PointTypePose3D p3d;
     PointTypePose6D p6d;
@@ -149,7 +159,7 @@ void addOdomFactor()
     }
 }
 
-// 闭环检测，找出闭环关键帧序号用于后续闭环判断；候选帧选择依据是此帧距离最近，时间久远超过阈值。
+// 闭环检测，找出闭环关键帧序号用于后续闭环判断；候选帧选择依据是此帧距离最近，时间久远超过阈值
 bool detectLoopFrameID(int *latestID, int *closestID)
 {
     int loopKeyCur = - 1;  // 当前关键帧序号
@@ -178,7 +188,7 @@ bool detectLoopFrameID(int *latestID, int *closestID)
         return false;
     *latestID = loopKeyCur;
     *closestID = loopKeyPre;
-    loopRecordIndex=loopKeyCur+2;
+    loopRecordIndex=loopKeyCur+2;  //跳过2帧
     return true;
 }
 
@@ -207,6 +217,7 @@ void getLoopLocalMap(pcl::PointCloud<PointType>::Ptr& nearKeyframes, const int& 
     *nearKeyframes = *cloud_temp;
 }
 
+//闭环判断与闭环因子的添加
 void addLoopFactor(){
     if (keyPose3DCloud->points.size()<5 || keyPose3DCloud->points.size()-1<=loopRecordIndex)
         return;
@@ -216,7 +227,7 @@ void addLoopFactor(){
         pcl::PointCloud<PointType>::Ptr cureKeyframeCloud(new pcl::PointCloud<PointType>());
         pcl::PointCloud<PointType>::Ptr prevKeyframeCloud(new pcl::PointCloud<PointType>());
         {
-            getLoopLocalMap(cureKeyframeCloud, loopKeyCur, 0);  // 提取当前关键帧
+            getLoopLocalMap(cureKeyframeCloud, loopKeyCur, 0);   // 提取当前关键帧
             getLoopLocalMap(prevKeyframeCloud, loopKeyPre, 10);  // 提取闭环匹配关键帧前后相邻若干帧
             if (cureKeyframeCloud->size() < 300 || prevKeyframeCloud->size() < 1000)
                 return;
@@ -235,7 +246,7 @@ void addLoopFactor(){
             return;
         // 闭环优化得到的当前关键帧与闭环关键帧之间的位姿变换
         correctionLidarFrame=icp.getFinalTransformation().cast<double>();
-        loopRecordIndex=loopRecordIndex+30;
+        loopRecordIndex=loopRecordIndex+30;     //闭环成功后跳过30帧再判断闭环
         // 闭环优化前当前帧位姿
         Eigen::Affine3d tWrong;
         PointTypePose6D pt6d=keyPose6DCloud->points[loopKeyCur];
@@ -260,6 +271,7 @@ void addLoopFactor(){
     }
 }
 
+//执行图优化
 void runOptimize(){
     isam->update(gtSAMgraph, initialEstimate);   // 执行优化
     isam->update();
@@ -275,6 +287,7 @@ void runOptimize(){
     isamCurrentEstimate = isam->calculateEstimate();  // 优化结果
 }
 
+//更新关键位姿信息（位置、位姿、轨迹、点云变换与拼接）
 void updateKeyPose(int i){
     keyPose3DCloud->points[i].x = isamCurrentEstimate.at<gtsam::Pose3>(i).translation().x();
     keyPose3DCloud->points[i].y = isamCurrentEstimate.at<gtsam::Pose3>(i).translation().y();
@@ -293,14 +306,14 @@ void updateKeyPose(int i){
     *mapCloudPtr += *cloud_res_i;
 }
 
-// 更新因子图中所有变量节点的位姿，也就是所有历史关键帧的位姿，更新里程计轨迹
+// 位姿校正，更新因子图中所有变量节点的位姿，也就是所有历史关键帧的位姿，更新里程计轨迹
 void correctPoses()
 {
     int numPoses = isamCurrentEstimate.size();
     if (aLoopIsClosed == true)
     {
         mapCloudPtr->clear();
-        // 更新因子图中所有变量节点的位姿，也就是所有历史关键帧的位姿
+        // 更新因子图中所有变量节点的位姿，即所有历史关键帧的位姿
         for (int i = 0; i < numPoses; ++i)
         {
             updateKeyPose(i);
@@ -313,10 +326,13 @@ void correctPoses()
     T_map_0_curr=trans_map_0_curr_i;
 }
 
+//发布优化校正结果
 void publishResult(){
+    //获取优化后的当前帧里程计（坐标变换）
     Eigen::Quaterniond eq;
     eq=T_map_0_curr.rotation();
     Eigen::Vector3d ev=T_map_0_curr.translation();
+    //发布优化后的里程计
     nav_msgs::Odometry laserOdometry;
     laserOdometry.header.frame_id = "map";
     laserOdometry.child_frame_id = "map_child";
@@ -329,11 +345,11 @@ void publishResult(){
     laserOdometry.pose.pose.position.y = ev.y();
     laserOdometry.pose.pose.position.z = ev.z();
     pub_map_odometry.publish(laserOdometry);
-
+    //发布优化后的轨迹
     globalPath.header.stamp=laserOdometry.header.stamp;
     globalPath.header.frame_id="map";
     pub_map_path.publish(globalPath);
-
+    //发布优化后的当前帧点云
     pcl::PointCloud<PointType>::Ptr cloud_res(new pcl::PointCloud<PointType>());
     pcl::transformPointCloud(*currFramePlanePtr, *cloud_res, T_map_0_curr);
     sensor_msgs::PointCloud2 res_cloud_msgs;
@@ -341,8 +357,8 @@ void publishResult(){
     res_cloud_msgs.header.stamp = laserOdometry.header.stamp;
     res_cloud_msgs.header.frame_id = "map";
     pub_map_frame.publish(res_cloud_msgs);
-
-    if(numFrame % 5 == 0){
+    //发布优化后的点云拼接地图
+    if(numFrame % 5 == 0){   //每隔5帧发布一次
         pcl::PointCloud<PointType>::Ptr cloud_temp(new pcl::PointCloud<PointType>());
         downSizeFilterMap.setInputCloud(mapCloudPtr);
         downSizeFilterMap.filter(*cloud_temp);
@@ -354,32 +370,34 @@ void publishResult(){
     }
 }
 
+//图优化过程管理
 void mapOptimization(){
-    if(isKeyFrame()){
+    if(isKeyFrame()){       //判断是否作为关键帧（如果原地变化很小，则不计入关键帧，相当于帧过滤）
         // get x, y, z, roll, pitch, yaw
         pcl::getTranslationAndEulerAngles(T_map_0_curr,arr6d[0],arr6d[1],arr6d[2],arr6d[3],arr6d[4],arr6d[5]);
         addPose3D6D(arr6d[0],arr6d[1],arr6d[2],arr6d[3],arr6d[4],arr6d[5],timeOdom);
         keyFrameVector.push_back(*currFramePlanePtr);  // save key frame
-        addOdomFactor();   // 激光里程计因子
-        addLoopFactor();  // 闭环因子
-        runOptimize();    // 执行优化
-        correctPoses();   // 更新里程计
+        addOdomFactor();    // 激光里程计因子
+        addLoopFactor();    // 闭环因子
+        runOptimize();      // 执行优化
+        correctPoses();     // 更新里程计
         publishResult();
     }
 }
 
+//点云处理多线程函数
 void cloudThread(){
     ros::Rate rate(20);
-    while(1){
+    while(ros::ok()){
         rate.sleep();
         if(isDone==0) continue;
         while (!odometryQueue.empty() && !planeQueue.empty()){
             if(isDone==0) continue;
             mLock.lock();
-            currHead.stamp=planeQueue.front()->header.stamp;
-            timePlane=planeQueue.front()->header.stamp.toSec();
-            timeOdom=odometryQueue.front()->header.stamp.toSec();
-            if(std::fabs(timePlane-timeOdom)>0.005){
+            currHead.stamp=planeQueue.front().header.stamp;
+            timePlane=planeQueue.front().header.stamp.toSec();
+            timeOdom=odometryQueue.front().header.stamp.toSec();
+            if(std::fabs(timePlane-timeOdom)>0.005){             //时间同步判断
                 printf("frame time unsync messeage! \n");
                 mLock.unlock();
                 break;
@@ -387,21 +405,22 @@ void cloudThread(){
             isDone=0;
             numFrame++;
             currFramePlanePtr->clear();
-            pcl::fromROSMsg(*planeQueue.front(),*currFramePlanePtr);
+            pcl::fromROSMsg(planeQueue.front(),*currFramePlanePtr);
             planeQueue.pop();
-            q_fodom_0_curr.x()=odometryQueue.front()->pose.pose.orientation.x;
-            q_fodom_0_curr.y()=odometryQueue.front()->pose.pose.orientation.y;
-            q_fodom_0_curr.z()=odometryQueue.front()->pose.pose.orientation.z;
-            q_fodom_0_curr.w()=odometryQueue.front()->pose.pose.orientation.w;
-            t_fodom_0_curr.x()=odometryQueue.front()->pose.pose.position.x;
-            t_fodom_0_curr.y()=odometryQueue.front()->pose.pose.position.y;
-            t_fodom_0_curr.z()=odometryQueue.front()->pose.pose.position.z;
+            q_fodom_0_curr.x()=odometryQueue.front().pose.pose.orientation.x;
+            q_fodom_0_curr.y()=odometryQueue.front().pose.pose.orientation.y;
+            q_fodom_0_curr.z()=odometryQueue.front().pose.pose.orientation.z;
+            q_fodom_0_curr.w()=odometryQueue.front().pose.pose.orientation.w;
+            t_fodom_0_curr.x()=odometryQueue.front().pose.pose.position.x;
+            t_fodom_0_curr.y()=odometryQueue.front().pose.pose.position.y;
+            t_fodom_0_curr.z()=odometryQueue.front().pose.pose.position.z;
             odometryQueue.pop();
             mLock.unlock();
+
             T_fodom_0_curr=Eigen::Affine3d::Identity();
             T_fodom_0_curr.rotate(q_fodom_0_curr);
             T_fodom_0_curr.pretranslate(t_fodom_0_curr);
-            T_map_0_curr=trans_loop_adjust*T_fodom_0_curr;
+            T_map_0_curr=trans_loop_adjust*T_fodom_0_curr;   // 闭环累计误差校正
             mapOptimization();
             isDone=1;
         }
