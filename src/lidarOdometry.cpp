@@ -48,9 +48,9 @@ ros::Publisher pub_frame_odometry;          //发布激光雷达里程计，由�
 ros::Publisher pub_frame_odom_path;         //发布激光雷达运动轨迹
 ros::Publisher pub_sum_lidar_odom_cloud;    //发布拼接后的点云地图
 //存储当前帧点云
-pcl::PointCloud<PointType>::Ptr lastPlaneCloudPtr(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr lastFramePlanePtr(new pcl::PointCloud<PointType>());
 //存储上一帧点云
-pcl::PointCloud<PointType>::Ptr currPlaneCloudPtr(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr currFramePlanePtr(new pcl::PointCloud<PointType>());
 //存储拼接后总点云
 pcl::PointCloud<PointType>::Ptr sumPlaneCloudPtr(new pcl::PointCloud<PointType>());
 std::queue<sensor_msgs::PointCloud2> planeQueue;  //定义点云消息队列
@@ -112,7 +112,7 @@ void publishResult(){
     pub_frame_odom_path.publish(lidarPathInOdom);
     //发布平面特征点云
     sensor_msgs::PointCloud2 plane_frame_cloud_msgs;
-    pcl::toROSMsg(*currPlaneCloudPtr, plane_frame_cloud_msgs);
+    pcl::toROSMsg(*currFramePlanePtr, plane_frame_cloud_msgs);
     plane_frame_cloud_msgs.header.stamp = lidarOdometry.header.stamp;
     plane_frame_cloud_msgs.header.frame_id = "map";
     pub_plane_frame_cloud.publish(plane_frame_cloud_msgs);
@@ -124,7 +124,7 @@ void publishResult(){
 //        Eigen::Affine3d transCurd ;
 //        pcl::getTransformation(t_0_curr.x(), t_0_curr.y(), t_0_curr.z(), r,p,y,transCurd);
 //        pcl::PointCloud<PointType>::Ptr cloud_res(new pcl::PointCloud<PointType>());
-//        pcl::transformPointCloud(*currPlaneCloudPtr, *cloud_res, transCurd);
+//        pcl::transformPointCloud(*currFramePlanePtr, *cloud_res, transCurd);
 //        *sumPlaneCloudPtr += *cloud_res;
 //        pcl::PointCloud<PointType>::Ptr cloud_temp(new pcl::PointCloud<PointType>());
 //        downSizeFilterMap.setInputCloud(sumPlaneCloudPtr);
@@ -147,15 +147,15 @@ void frameRegistration(){
     problem.AddParameterBlock(para_t,3);
 
     pcl::KdTreeFLANN<PointType> kdTreePlanLast;
-    int last_plane_num=lastPlaneCloudPtr->points.size();
-    int curr_plane_num=currPlaneCloudPtr->points.size();
+    int last_plane_num=lastFramePlanePtr->points.size();
+    int curr_plane_num=currFramePlanePtr->points.size();
     if(last_plane_num>10){
-        kdTreePlanLast.setInputCloud(lastPlaneCloudPtr);
+        kdTreePlanLast.setInputCloud(lastFramePlanePtr);
         for(int i_opt=0;i_opt<2;i_opt++){
             for (int i = 0; i < curr_plane_num; ++i) {    //遍历当前帧各平面点
                 PointType pointSeed;
                 //将当前帧此平面点坐标变换到上一帧坐标系中
-                transformToLast(&currPlaneCloudPtr->points[i],&pointSeed);
+                transformToLast(&currFramePlanePtr->points[i],&pointSeed);
                 std::vector<float> pointSearchSqDis1;
                 std::vector<int> indx1;
                 //将变换后的此点作为种子点，查找上一帧中距离此点最近点的索引
@@ -164,7 +164,7 @@ void frameRegistration(){
                 std::vector<float> pointSearchSqDis2;
                 std::vector<int> indx2;
                 //将上面最近点作为种子点，查找上一帧中距离最近点的索引和距离
-                kdTreePlanLast.nearestKSearch(lastPlaneCloudPtr->points[p_ind_a],30,indx2,pointSearchSqDis2);
+                kdTreePlanLast.nearestKSearch(lastFramePlanePtr->points[p_ind_a],30,indx2,pointSearchSqDis2);
                 std::vector<int> v_indx5;
                 std::vector<int> v_indx_row;
                 int p_row=-1;
@@ -172,7 +172,7 @@ void frameRegistration(){
                 int n=5;
                 //挑选5个最近点，尽量满足有2个点不属于同一扫描线
                 for (size_t i_kd = 0; i_kd < indx2.size(); ++i_kd) {
-                    float f_indx=lastPlaneCloudPtr->points[indx2[i_kd]].intensity;
+                    float f_indx=lastFramePlanePtr->points[indx2[i_kd]].intensity;
                     int i_indx=int(f_indx);
                     int row=100*(f_indx-i_indx+0.002);   //获取点索引
                     if(i_kd==0){
@@ -206,26 +206,26 @@ void frameRegistration(){
                     matB0.fill(-1);
                     matX0.setZero();
                     for (int j = 0; j < 5; ++j) {
-                        matA0(j,0)=lastPlaneCloudPtr->points[v_indx5[j]].x;
-                        matA0(j,1)=lastPlaneCloudPtr->points[v_indx5[j]].y;
-                        matA0(j,2)=lastPlaneCloudPtr->points[v_indx5[j]].z;
+                        matA0(j,0)=lastFramePlanePtr->points[v_indx5[j]].x;
+                        matA0(j,1)=lastFramePlanePtr->points[v_indx5[j]].y;
+                        matA0(j,2)=lastFramePlanePtr->points[v_indx5[j]].z;
                     }
                     matX0=matA0.colPivHouseholderQr().solve(matB0);
                     matX0.normalize();  //norm
                     bool planeValid = true;
                     for (int k = 0; k < 4; ++k) {   //利用法向量计算各点到平面的距离
                         Eigen::Vector3d v_temp(
-                                lastPlaneCloudPtr->points[v_indx5[k]].x-lastPlaneCloudPtr->points[v_indx5[k+1]].x,
-                                lastPlaneCloudPtr->points[v_indx5[k]].y-lastPlaneCloudPtr->points[v_indx5[k+1]].y,
-                                lastPlaneCloudPtr->points[v_indx5[k]].z-lastPlaneCloudPtr->points[v_indx5[k+1]].z
+                                lastFramePlanePtr->points[v_indx5[k]].x-lastFramePlanePtr->points[v_indx5[k+1]].x,
+                                lastFramePlanePtr->points[v_indx5[k]].y-lastFramePlanePtr->points[v_indx5[k+1]].y,
+                                lastFramePlanePtr->points[v_indx5[k]].z-lastFramePlanePtr->points[v_indx5[k+1]].z
                         );
                         if(fabs(matX0(0)*v_temp[0]+matX0(1)*v_temp[1]+matX0(2)*v_temp[2])>planeMax){
                             planeValid=false;       //如果有点到平面的距离太大，则说明此5点不共面
                             break;
                         }
                     }
-                    Eigen::Vector3d po(currPlaneCloudPtr->points[i].x,currPlaneCloudPtr->points[i].y,currPlaneCloudPtr->points[i].z);
-                    Eigen::Vector3d pa(lastPlaneCloudPtr->points[p_ind_a].x,lastPlaneCloudPtr->points[p_ind_a].y,lastPlaneCloudPtr->points[p_ind_a].z);
+                    Eigen::Vector3d po(currFramePlanePtr->points[i].x,currFramePlanePtr->points[i].y,currFramePlanePtr->points[i].z);
+                    Eigen::Vector3d pa(lastFramePlanePtr->points[p_ind_a].x,lastFramePlanePtr->points[p_ind_a].y,lastFramePlanePtr->points[p_ind_a].z);
                     Eigen::Vector3d norm(matX0[0],matX0[1],matX0[2]);
                     if(planeValid){                 //当找到了共面点，就利用种子点、最近点、平面法向量，构造点与平面共面的优化条件
                         problem.AddResidualBlock(new ceres::AutoDiffCostFunction<PlaneFeatureCost,1,4,3>
@@ -268,10 +268,10 @@ void cloudThread(){
             rate2.sleep();
 
             mLock.lock();               //锁线程，取数据
-            currPlaneCloudPtr->clear();
+            currFramePlanePtr->clear();
             currHead=planeQueue.front().header;
             timePlane=planeQueue.front().header.stamp.toSec();
-            pcl::fromROSMsg(planeQueue.front(),*currPlaneCloudPtr);
+            pcl::fromROSMsg(planeQueue.front(),*currFramePlanePtr);
             planeQueue.pop();
             mLock.unlock();
 
@@ -281,7 +281,7 @@ void cloudThread(){
                 frameRegistration();
                 publishResult();
             }
-            *lastPlaneCloudPtr=*currPlaneCloudPtr;
+            *lastFramePlanePtr=*currFramePlanePtr;
             isDone=1;
         }
     }

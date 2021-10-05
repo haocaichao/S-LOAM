@@ -333,20 +333,20 @@ void publishResult(){
     eq=T_map_0_curr.rotation();
     Eigen::Vector3d ev=T_map_0_curr.translation();
     //发布优化后的里程计
-    nav_msgs::Odometry laserOdometry;
-    laserOdometry.header.frame_id = "map";
-    laserOdometry.child_frame_id = "map_child";
-    laserOdometry.header.stamp = currHead.stamp;
-    laserOdometry.pose.pose.orientation.x = eq.x();
-    laserOdometry.pose.pose.orientation.y = eq.y();
-    laserOdometry.pose.pose.orientation.z = eq.z();
-    laserOdometry.pose.pose.orientation.w = eq.w();
-    laserOdometry.pose.pose.position.x = ev.x();
-    laserOdometry.pose.pose.position.y = ev.y();
-    laserOdometry.pose.pose.position.z = ev.z();
-    pub_map_odometry.publish(laserOdometry);
+    nav_msgs::Odometry lidarOdometry;
+    lidarOdometry.header.frame_id = "map";
+    lidarOdometry.child_frame_id = "map_child";
+    lidarOdometry.header.stamp = currHead.stamp;
+    lidarOdometry.pose.pose.orientation.x = eq.x();
+    lidarOdometry.pose.pose.orientation.y = eq.y();
+    lidarOdometry.pose.pose.orientation.z = eq.z();
+    lidarOdometry.pose.pose.orientation.w = eq.w();
+    lidarOdometry.pose.pose.position.x = ev.x();
+    lidarOdometry.pose.pose.position.y = ev.y();
+    lidarOdometry.pose.pose.position.z = ev.z();
+    pub_map_odometry.publish(lidarOdometry);
     //发布优化后的轨迹
-    globalPath.header.stamp=laserOdometry.header.stamp;
+    globalPath.header.stamp=lidarOdometry.header.stamp;
     globalPath.header.frame_id="map";
     pub_map_path.publish(globalPath);
     //发布优化后的当前帧点云
@@ -354,7 +354,7 @@ void publishResult(){
     pcl::transformPointCloud(*currFramePlanePtr, *cloud_res, T_map_0_curr);
     sensor_msgs::PointCloud2 res_cloud_msgs;
     pcl::toROSMsg(*cloud_res, res_cloud_msgs);
-    res_cloud_msgs.header.stamp = laserOdometry.header.stamp;
+    res_cloud_msgs.header.stamp = lidarOdometry.header.stamp;
     res_cloud_msgs.header.frame_id = "map";
     pub_map_frame.publish(res_cloud_msgs);
     //发布优化后的点云拼接地图
