@@ -33,33 +33,40 @@
 #include <gtsam/nonlinear/ISAM2.h>
 #include <pcl/registration/icp.h>
 
-//int N_SCAN_ROW=16;
-int N_SCAN_ROW=64;
+//int N_SCAN_ROW=16;    // 激光雷达线数，16线
+int N_SCAN_ROW=64;      // 激光雷达线数，64线
 
+/**
+ * 点信息结构
+ * value,indexInRow
+ */
 typedef struct {
-    float value;
-    int flag;
-    int indexInRow;
+    float value;        // 属性值，比如曲率
+    int indexInRow;     // 行内点索引
 } PointInfo;
 
 /**
- * Velodyne点云结构，变量名XYZIRT是每个变量的首字母
+ * Velodyne点云结构
+ * x,y,z,intensity,ring,time
+ * 按照pcl规定，自定义点云结构，主要用于点云数据的接收与解析
+ * 自定义点云结构的缺点是，在有些pcl函数中无法识别，比如kdtree中
 */
 struct VelodynePointXYZIRT {
-    PCL_ADD_POINT4D     // 位置
-            PCL_ADD_INTENSITY;  // 激光点反射强度，也可以存点的索引
-//    uint16_t ring;      // 扫描线
-//    float time;         // 时间戳，记录相对于当前帧第一个激光点的时差，第一个点time=0
+    PCL_ADD_POINT4D       // 位置
+    PCL_ADD_INTENSITY;    // 激光点反射强度，也可以存点的索引
+    //uint16_t ring;      // 各点所在扫描线号，可选
+    //float time;         // 各点时间戳，相对于帧第一个点时间差，可选
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-} EIGEN_ALIGN16;        // 内存16字节对齐，EIGEN SSE优化要求
+} EIGEN_ALIGN16;          // 内存16字节对齐，EIGEN SSE优化要求
 // 注册为PCL点云格式
 POINT_CLOUD_REGISTER_POINT_STRUCT (VelodynePointXYZIRT,
-(float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
-//(uint16_t, ring, ring)(float, time, time)
+    (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
+    //(uint16_t, ring, ring)(float, time, time)
 )
 
 /**
- * 6D位姿点云结构定义
+ * 6D位姿点云结构定义(x,y,z,roll,pitch,yaw)
+ * x,y,z,intensity,roll,pitch,yaw,time
 */
 struct PointXYZIRPYT
 {
@@ -73,9 +80,9 @@ struct PointXYZIRPYT
 } EIGEN_ALIGN16;
 
 POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIRPYT,
-                                   (float, x, x) (float, y, y)
-                                           (float, z, z) (float, intensity, intensity)
-                                           (float, roll, roll) (float, pitch, pitch) (float, yaw, yaw)
-                                           (double, time, time))
+    (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
+    (float, roll, roll)(float, pitch, pitch)(float, yaw, yaw)
+    (double, time, time)
+)
 
 #endif //SLOAM_HEADER_H

@@ -57,7 +57,6 @@ void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
         if (scanID > -1 && scanID < N_SCAN_ROW) {
             PointInfo p_info;
             p_info.value = 0;
-            p_info.flag = 0;
             p_info.indexInRow = v_scan_row[scanID].size();
             v_scan_row_info[scanID].push_back(p_info);
             point.intensity=p_info.indexInRow+scanID/100.0;
