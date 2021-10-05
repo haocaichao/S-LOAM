@@ -53,12 +53,12 @@ void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
         } else {
             //计算垂向角度
             float angle = atan(point.z / sqrt(point.x * point.x + point.y * point.y)) * 180 / M_PI;
-            if (N_SCAN_ROW == 16) {     //16点云线号计算
+            if (N_SCAN_ROW == 16) {     //16线点云线号计算
                 if (angle >= -15 || angle <= 15) {
                     scanID = int((angle + 15) / 2 + 0.5);
                 }
             }
-            if (N_SCAN_ROW == 64) {     //64点云线号计算
+            if (N_SCAN_ROW == 64) {     //64线点云线号计算
                 if (angle >= -24.33 || angle <= 2) {
                     if (angle >= -8.83){
                         scanID = int((2 - angle) * 3.0 + 0.5);
@@ -119,7 +119,6 @@ void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
             }
         }
     }
-
     //点云下采样，抽稀
     pcl::PointCloud<PointTypeOut>::Ptr cloud_temp(new pcl::PointCloud<PointTypeOut>());
     downSizeFilterPlane.setInputCloud(framePlanePtr);
@@ -136,7 +135,6 @@ void cldHandler(const sensor_msgs::PointCloud2ConstPtr &cldMsg) {
     orgCloudMsg.header.frame_id="map";
     pub_org_frame_cloud.publish(orgCloudMsg);
 }
-
 
 int main(int argc, char **argv) {
     //针对不同线数激光雷达数据，设置不同参数
