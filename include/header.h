@@ -46,7 +46,7 @@ typedef struct {
 } PointInfo;
 
 /**
- * Velodyne点云结构
+ * 点结构
  * x,y,z,intensity,ring,time
  * 按照pcl规定，自定义点云结构，主要用于点云数据的接收与解析
  * 自定义点云结构的缺点是，在有些pcl函数中无法识别，比如kdtree中
@@ -65,7 +65,7 @@ POINT_CLOUD_REGISTER_POINT_STRUCT (VelodynePointXYZIRT,
 )
 
 /**
- * 6D位姿点云结构定义(x,y,z,roll,pitch,yaw)
+ * 6D位姿点结构定义(x,y,z,roll,pitch,yaw)
  * x,y,z,intensity,roll,pitch,yaw,time
 */
 struct PointXYZIRPYT
