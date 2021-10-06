@@ -99,9 +99,17 @@ S-LOAM的改进版本正在路上。
 
 关于S-LOAM更多信息，可以关注下面的网站。
 
+
 网站一：个人csdn博客
 
+S-LOAM 最简单的激光SLAM
+
 https://blog.csdn.net/hccmap/article/details/119984889
+
+运行S-LOAM激光SLAM程序
+
+https://blog.csdn.net/hccmap/article/details/120626920
+
 
 网站二：这个是个人网站，内容包括python和slam，将在至少5年内持续维护。
 
